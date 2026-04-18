@@ -1,0 +1,42 @@
+name: Auto Scrape Fog Images
+
+on:
+  schedule:
+    - cron: '15,45 * * * *'
+  workflow_dispatch:
+
+jobs:
+  scrape-and-save:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install Tesseract OCR
+      run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+
+    - name: Install Python dependencies
+      run: |
+        cd 时刻爬取
+        pip install -r requirements.txt
+
+    - name: Run Scraper
+      run: |
+        cd 时刻爬取
+        python main.py
+
+    - name: Commit and Push changes
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add .
+        git commit -m "🤖 自动抓取最新图片和更新表格" || echo "没有新数据需要提交"
+        git push
