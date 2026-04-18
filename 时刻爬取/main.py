@@ -95,17 +95,36 @@ for target in targets:
 
         print("正在识别图片时间...")
         extracted_time = get_real_time_from_image(img_bytes)
-
         bjt_now = datetime.utcnow() + timedelta(hours=8)
+
+        # 智能判断：时间来源与有效性
         if extracted_time:
             final_time = extracted_time
+            time_source = 'OCR'
+            is_valid = 1
         else:
             final_time = bjt_now.strftime('%Y-%m-%d %H:%M:%S')
+            time_source = 'System'
+            is_valid = 0
             print(f"⚠️ 识别失败，使用当前北京时间兜底: {final_time}")
 
         if final_time in existing_times:
             print(f"🛑 发现重复数据！时间 {final_time} 已存在，跳过 {direction} 的保存。")
             continue
+
+        # 智能计算：延迟分钟数 (time_diff_min) 和 白天黑夜 (is_daytime)
+        try:
+            final_dt = datetime.strptime(final_time, '%Y-%m-%d %H:%M:%S')
+            # 计算延迟：当前北京时间 - 图片上的时间
+            diff_seconds = (bjt_now - final_dt).total_seconds()
+            time_diff_min = round(diff_seconds / 60)
+            
+            # 判断白天：6点(含)到18点(不含)视为白天
+            is_daytime = 1 if 6 <= final_dt.hour < 18 else 0
+        except Exception as e:
+            time_diff_min = ''
+            is_daytime = ''
+            print(f"时间计算出错: {e}")
 
         safe_time_str = final_time.replace(':', '-')
         image_filename = f"{direction}_{safe_time_str}.jpg"
@@ -115,20 +134,20 @@ for target in targets:
             f.write(img_bytes)
         print(f"✅ 成功保存新图片: {image_filename}")
 
-        # 严格按照 12 个字段准备数据，未获取的数据留空
+        # 填入 12 个字段 (能算的都算好，不能算的留空)
         new_data.append({
             '时间': final_time,
             '方向': direction,
             '图片路径': image_path,
             '图片名': image_filename,
-            'time_source': '',
-            'is_valid': '',
-            'is_daytime': '',
-            'visibility_time': '',
-            'visibility': '',
-            'time_diff_min': '',
-            'label': '',
-            'remark': ''
+            'time_source': time_source,
+            'is_valid': is_valid,
+            'is_daytime': is_daytime,
+            'visibility_time': '',  # 需人工或大模型判断
+            'visibility': '',       # 需人工或大模型判断
+            'time_diff_min': time_diff_min,
+            'label': '',            # 需人工标注
+            'remark': ''            # 备注留空
         })
 
     except Exception as e:
@@ -136,39 +155,33 @@ for target in targets:
 
 # 5. 更新 Excel 表格 (12列定制排版)
 if new_data:
-    # 定义你要求的 12 个表头
     headers = [
         '时间', '方向', '图片路径', '图片名', 'time_source', 'is_valid', 
         'is_daytime', 'visibility_time', 'visibility', 'time_diff_min', 'label', 'remark'
     ]
     
-    # 如果表格不存在，先创建一个带漂亮格式的空表
     if not os.path.exists(excel_path):
         wb = Workbook()
         ws = wb.active
         ws.title = "爬虫数据"
         ws.append(headers)
         
-        # 设置列宽，让表格看起来更舒服
-        ws.column_dimensions['A'].width = 20  # 时间
-        ws.column_dimensions['B'].width = 12  # 方向
-        ws.column_dimensions['C'].width = 45  # 图片路径
-        ws.column_dimensions['D'].width = 30  # 图片名
+        ws.column_dimensions['A'].width = 20
+        ws.column_dimensions['B'].width = 12
+        ws.column_dimensions['C'].width = 45
+        ws.column_dimensions['D'].width = 30
         for col in ['E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']:
             ws.column_dimensions[col].width = 15
         
-        # 表头加粗居中
         for cell in ws[1]:
             cell.font = Font(bold=True)
             cell.alignment = Alignment(horizontal='center')
         wb.save(excel_path)
 
-    # 打开表格追加新数据
     try:
         wb = load_workbook(excel_path)
         ws = wb.active
         for row in new_data:
-            # 严格按照 12 列顺序写入
             row_values = [
                 row['时间'], row['方向'], row['图片路径'], row['图片名'],
                 row['time_source'], row['is_valid'], row['is_daytime'],
@@ -177,7 +190,6 @@ if new_data:
             ]
             ws.append(row_values)
             
-            # 让新追加的数据靠左对齐
             for cell in ws[ws.max_row]:
                 cell.alignment = Alignment(horizontal='left')
         wb.save(excel_path)
