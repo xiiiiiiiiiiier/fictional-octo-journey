@@ -33,7 +33,7 @@ if os.path.exists(excel_path):
         if '时间' in df.columns:
             existing_times = set(df['时间'].astype(str).tolist())
     except Exception as e:
-        print(f"读取旧表格失败，将重新开始: {e}")
+        print(f"读取旧表格失败: {e}")
 
 def get_real_time_from_image(img_bytes):
     """裁剪图片右上角并使用 OpenCV 增强识别时间"""
@@ -59,7 +59,6 @@ def get_real_time_from_image(img_bytes):
         time_match = re.search(r'(\d{2}:\d{2}:\d{2})', text)
 
         if date_match and time_match:
-            # 自动补零对齐，例如把 4-18 变成 04-18
             raw_date = date_match.group(1).replace('/', '-')
             try:
                 parsed_date = datetime.strptime(raw_date, "%m-%d")
@@ -116,30 +115,49 @@ for target in targets:
             f.write(img_bytes)
         print(f"✅ 成功保存新图片: {image_filename}")
 
+        # 严格按照 12 个字段准备数据，未获取的数据留空
         new_data.append({
             '时间': final_time,
             '方向': direction,
-            '图片路径': image_path
+            '图片路径': image_path,
+            '图片名': image_filename,
+            'time_source': '',
+            'is_valid': '',
+            'is_daytime': '',
+            'visibility_time': '',
+            'visibility': '',
+            'time_diff_min': '',
+            'label': '',
+            'remark': ''
         })
 
     except Exception as e:
         print(f"抓取 {direction} 失败: {e}")
 
-# 5. 更新 Excel 表格 (智能排版与无损追加)
+# 5. 更新 Excel 表格 (12列定制排版)
 if new_data:
+    # 定义你要求的 12 个表头
+    headers = [
+        '时间', '方向', '图片路径', '图片名', 'time_source', 'is_valid', 
+        'is_daytime', 'visibility_time', 'visibility', 'time_diff_min', 'label', 'remark'
+    ]
+    
     # 如果表格不存在，先创建一个带漂亮格式的空表
     if not os.path.exists(excel_path):
         wb = Workbook()
         ws = wb.active
         ws.title = "爬虫数据"
-        ws.append(['时间', '方向', '图片路径'])
+        ws.append(headers)
         
-        # 设置列宽
-        ws.column_dimensions['A'].width = 22  # 时间列宽
-        ws.column_dimensions['B'].width = 15  # 方向列宽
-        ws.column_dimensions['C'].width = 65  # 路径列宽超级加倍
+        # 设置列宽，让表格看起来更舒服
+        ws.column_dimensions['A'].width = 20  # 时间
+        ws.column_dimensions['B'].width = 12  # 方向
+        ws.column_dimensions['C'].width = 45  # 图片路径
+        ws.column_dimensions['D'].width = 30  # 图片名
+        for col in ['E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']:
+            ws.column_dimensions[col].width = 15
         
-        # 设置表头加粗和居中
+        # 表头加粗居中
         for cell in ws[1]:
             cell.font = Font(bold=True)
             cell.alignment = Alignment(horizontal='center')
@@ -150,12 +168,20 @@ if new_data:
         wb = load_workbook(excel_path)
         ws = wb.active
         for row in new_data:
-            ws.append([row['时间'], row['方向'], row['图片路径']])
-            # 让新追加的数据也靠左对齐，保持整洁
+            # 严格按照 12 列顺序写入
+            row_values = [
+                row['时间'], row['方向'], row['图片路径'], row['图片名'],
+                row['time_source'], row['is_valid'], row['is_daytime'],
+                row['visibility_time'], row['visibility'], row['time_diff_min'],
+                row['label'], row['remark']
+            ]
+            ws.append(row_values)
+            
+            # 让新追加的数据靠左对齐
             for cell in ws[ws.max_row]:
                 cell.alignment = Alignment(horizontal='left')
         wb.save(excel_path)
-        print(f"\n✅ 数据已按完美格式追加至: {excel_path}")
+        print(f"\n✅ 数据已按 12 列完美格式追加至: {excel_path}")
     except Exception as e:
         print(f"保存表格失败: {e}")
 else:
