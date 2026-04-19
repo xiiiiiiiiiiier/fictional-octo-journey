@@ -137,7 +137,7 @@ for target in targets:
             is_daytime = ''
 
         safe_time_str = final_time.replace(':', '-')
-        image_filename = f"{direction}_{safe_time_str}.jpg"
+        image_filename = f"{safe_time_str}_{direction}.jpg"
         image_path = os.path.join(image_dir, image_filename)
 
         with open(image_path, 'wb') as f:
