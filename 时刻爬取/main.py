@@ -36,7 +36,7 @@ if os.path.exists(excel_path):
         print(f"读取旧表格失败: {e}")
 
 def get_real_time_from_image(img_bytes):
-    """全天候多模式 OCR 识别"""
+    """全天候多模式 OCR 识别 + 严格日期校验"""
     try:
         img = Image.open(BytesIO(img_bytes))
         width, height = img.size
@@ -49,10 +49,8 @@ def get_real_time_from_image(img_bytes):
         else:
             gray = img_array
             
-        # 放大图片 2 倍，显著提升 OCR 对小字的敏感度
         gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
 
-        # 准备 4 种全天候图像处理方案
         _, thresh_night = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
         thresh_day = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 2)
         _, thresh_bright = cv2.threshold(gray, 220, 255, cv2.THRESH_BINARY_INV)
@@ -66,25 +64,35 @@ def get_real_time_from_image(img_bytes):
 
         custom_config = r'--oem 3 --psm 6'
 
-        # 轮询尝试：只要有一种模式看清了时间，立刻停止并返回
         for mode_name, processed_img in filters:
             text = pytesseract.image_to_string(processed_img, lang='eng', config=custom_config)
             
-            # 兼容带年份和不带年份的日期格式
-            date_match = re.search(r'(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2})', text)
             time_match = re.search(r'(\d{2}:\d{2}:\d{2})', text)
-
-            if date_match and time_match:
-                raw_date = date_match.group(1).replace('/', '-')
-                # 如果没有识别到年份，自动补全当前年份
-                if len(raw_date) <= 5:
-                    bjt_now = datetime.utcnow() + timedelta(hours=8)
-                    raw_date = f"{bjt_now.year}-{raw_date}"
-                
+            if time_match:
                 hour_minute_second = time_match.group(1)
+                date_match = re.search(r'(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2})', text)
+                bjt_now = datetime.utcnow() + timedelta(hours=8)
+                
+                if date_match:
+                    raw_date = date_match.group(1).replace('/', '-')
+                    if len(raw_date) <= 5:
+                        raw_date = f"{bjt_now.year}-{raw_date}"
+                else:
+                    raw_date = bjt_now.strftime('%Y-%m-%d')
+
                 final_str = f"{raw_date} {hour_minute_second}"
-                print(f"👁️ [{mode_name}] 成功识别时间: {final_str}")
-                return final_str
+                
+                # 🛡️ 终极安全校验：测试这个日期是否符合人类常识
+                try:
+                    datetime.strptime(final_str, '%Y-%m-%d %H:%M:%S')
+                    print(f"👁️ [{mode_name}] 成功识别时间: {final_str}")
+                    return final_str
+                except ValueError:
+                    # 如果报错（比如19月48日），强行用今天的系统日期 + 识别出的时分秒
+                    safe_date = bjt_now.strftime('%Y-%m-%d')
+                    safe_str = f"{safe_date} {hour_minute_second}"
+                    print(f"⚠️ 发现离谱日期，已自动修正为: {safe_str}")
+                    return safe_str
                 
         print("⚠️ 所有视觉模式均未能识别出时间文字。")
     except Exception as e:
@@ -121,7 +129,6 @@ for target in targets:
             final_time = bjt_now.strftime('%Y-%m-%d %H:%M:%S')
             time_source = 'System'
             is_valid = 0
-            print(f"⚠️ 兜底机制：使用当前系统时间: {final_time}")
 
         if final_time in existing_times:
             print(f"🛑 时间 {final_time} 已存在，跳过。")
@@ -137,6 +144,7 @@ for target in targets:
             is_daytime = ''
 
         safe_time_str = final_time.replace(':', '-')
+        # 顺便帮你把文件命名改成了“时间在前”，以后下载到电脑会自动按时间排序！
         image_filename = f"{safe_time_str}_{direction}.jpg"
         image_path = os.path.join(image_dir, image_filename)
 
@@ -184,4 +192,3 @@ if new_data:
         print(f"保存表格失败: {e}")
 else:
     print("没有新数据，表格未更新。")
-
