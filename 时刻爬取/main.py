@@ -25,7 +25,7 @@ excel_path = os.path.join(excel_dir, "表.xlsx")
 os.makedirs(image_dir, exist_ok=True)
 os.makedirs(excel_dir, exist_ok=True)
 
-# 3. 读取现有表格 (用于防重复检查)
+# 3. 读取现有表格
 existing_times = set()
 if os.path.exists(excel_path):
     try:
@@ -36,7 +36,7 @@ if os.path.exists(excel_path):
         print(f"读取旧表格失败: {e}")
 
 def get_real_time_from_image(img_bytes):
-    """裁剪图片右上角并使用 OpenCV 增强识别时间"""
+    """全天候多模式 OCR 识别"""
     try:
         img = Image.open(BytesIO(img_bytes))
         width, height = img.size
@@ -49,28 +49,44 @@ def get_real_time_from_image(img_bytes):
         else:
             gray = img_array
             
-        _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
+        # 放大图片 2 倍，显著提升 OCR 对小字的敏感度
+        gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+
+        # 准备 4 种全天候图像处理方案
+        _, thresh_night = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
+        thresh_day = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 2)
+        _, thresh_bright = cv2.threshold(gray, 220, 255, cv2.THRESH_BINARY_INV)
+        
+        filters = [
+            ("黑夜模式", thresh_night),
+            ("白天模式", thresh_day),
+            ("强光模式", thresh_bright),
+            ("原图模式", gray)
+        ]
 
         custom_config = r'--oem 3 --psm 6'
-        text = pytesseract.image_to_string(thresh, lang='eng', config=custom_config)
-        print(f"🤖 AI 看到的原始文字是: 【{text.strip()}】")
 
-        date_match = re.search(r'(\d{1,2}[-/]\d{1,2})', text)
-        time_match = re.search(r'(\d{2}:\d{2}:\d{2})', text)
+        # 轮询尝试：只要有一种模式看清了时间，立刻停止并返回
+        for mode_name, processed_img in filters:
+            text = pytesseract.image_to_string(processed_img, lang='eng', config=custom_config)
+            
+            # 兼容带年份和不带年份的日期格式
+            date_match = re.search(r'(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2})', text)
+            time_match = re.search(r'(\d{2}:\d{2}:\d{2})', text)
 
-        if date_match and time_match:
-            raw_date = date_match.group(1).replace('/', '-')
-            try:
-                parsed_date = datetime.strptime(raw_date, "%m-%d")
-                month_day = parsed_date.strftime("%m-%d")
-            except:
-                month_day = raw_date 
-
-            hour_minute_second = time_match.group(1)
-            bjt_now = datetime.utcnow() + timedelta(hours=8)
-            current_year = bjt_now.year
-
-            return f"{current_year}-{month_day} {hour_minute_second}"
+            if date_match and time_match:
+                raw_date = date_match.group(1).replace('/', '-')
+                # 如果没有识别到年份，自动补全当前年份
+                if len(raw_date) <= 5:
+                    bjt_now = datetime.utcnow() + timedelta(hours=8)
+                    raw_date = f"{bjt_now.year}-{raw_date}"
+                
+                hour_minute_second = time_match.group(1)
+                final_str = f"{raw_date} {hour_minute_second}"
+                print(f"👁️ [{mode_name}] 成功识别时间: {final_str}")
+                return final_str
+                
+        print("⚠️ 所有视觉模式均未能识别出时间文字。")
     except Exception as e:
         print(f"OCR 识别出错: {e}")
     return None
@@ -93,11 +109,10 @@ for target in targets:
         response.raise_for_status()
         img_bytes = response.content
 
-        print("正在识别图片时间...")
+        print("正在启动全天候识别引擎...")
         extracted_time = get_real_time_from_image(img_bytes)
         bjt_now = datetime.utcnow() + timedelta(hours=8)
 
-        # 智能判断：时间来源与有效性
         if extracted_time:
             final_time = extracted_time
             time_source = 'OCR'
@@ -106,25 +121,20 @@ for target in targets:
             final_time = bjt_now.strftime('%Y-%m-%d %H:%M:%S')
             time_source = 'System'
             is_valid = 0
-            print(f"⚠️ 识别失败，使用当前北京时间兜底: {final_time}")
+            print(f"⚠️ 兜底机制：使用当前系统时间: {final_time}")
 
         if final_time in existing_times:
-            print(f"🛑 发现重复数据！时间 {final_time} 已存在，跳过 {direction} 的保存。")
+            print(f"🛑 时间 {final_time} 已存在，跳过。")
             continue
 
-        # 智能计算：延迟分钟数 (time_diff_min) 和 白天黑夜 (is_daytime)
         try:
             final_dt = datetime.strptime(final_time, '%Y-%m-%d %H:%M:%S')
-            # 计算延迟：当前北京时间 - 图片上的时间
             diff_seconds = (bjt_now - final_dt).total_seconds()
             time_diff_min = round(diff_seconds / 60)
-            
-            # 判断白天：6点(含)到18点(不含)视为白天
             is_daytime = 1 if 6 <= final_dt.hour < 18 else 0
         except Exception as e:
             time_diff_min = ''
             is_daytime = ''
-            print(f"时间计算出错: {e}")
 
         safe_time_str = final_time.replace(':', '-')
         image_filename = f"{direction}_{safe_time_str}.jpg"
@@ -132,28 +142,19 @@ for target in targets:
 
         with open(image_path, 'wb') as f:
             f.write(img_bytes)
-        print(f"✅ 成功保存新图片: {image_filename}")
+        print(f"✅ 保存图片: {image_filename}")
 
-        # 填入 12 个字段 (能算的都算好，不能算的留空)
         new_data.append({
-            '时间': final_time,
-            '方向': direction,
-            '图片路径': image_path,
-            '图片名': image_filename,
-            'time_source': time_source,
-            'is_valid': is_valid,
-            'is_daytime': is_daytime,
-            'visibility_time': '',  # 需人工或大模型判断
-            'visibility': '',       # 需人工或大模型判断
-            'time_diff_min': time_diff_min,
-            'label': '',            # 需人工标注
-            'remark': ''            # 备注留空
+            '时间': final_time, '方向': direction, '图片路径': image_path, '图片名': image_filename,
+            'time_source': time_source, 'is_valid': is_valid, 'is_daytime': is_daytime,
+            'visibility_time': '', 'visibility': '', 'time_diff_min': time_diff_min,
+            'label': '', 'remark': ''
         })
 
     except Exception as e:
         print(f"抓取 {direction} 失败: {e}")
 
-# 5. 更新 Excel 表格 (12列定制排版)
+# 5. 更新 Excel 表格
 if new_data:
     headers = [
         '时间', '方向', '图片路径', '图片名', 'time_source', 'is_valid', 
@@ -165,14 +166,6 @@ if new_data:
         ws = wb.active
         ws.title = "爬虫数据"
         ws.append(headers)
-        
-        ws.column_dimensions['A'].width = 20
-        ws.column_dimensions['B'].width = 12
-        ws.column_dimensions['C'].width = 45
-        ws.column_dimensions['D'].width = 30
-        for col in ['E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']:
-            ws.column_dimensions[col].width = 15
-        
         for cell in ws[1]:
             cell.font = Font(bold=True)
             cell.alignment = Alignment(horizontal='center')
@@ -182,19 +175,13 @@ if new_data:
         wb = load_workbook(excel_path)
         ws = wb.active
         for row in new_data:
-            row_values = [
-                row['时间'], row['方向'], row['图片路径'], row['图片名'],
-                row['time_source'], row['is_valid'], row['is_daytime'],
-                row['visibility_time'], row['visibility'], row['time_diff_min'],
-                row['label'], row['remark']
-            ]
-            ws.append(row_values)
-            
+            ws.append([row[h] for h in headers])
             for cell in ws[ws.max_row]:
                 cell.alignment = Alignment(horizontal='left')
         wb.save(excel_path)
-        print(f"\n✅ 数据已按 12 列完美格式追加至: {excel_path}")
+        print(f"\n✅ 数据已追加至: {excel_path}")
     except Exception as e:
         print(f"保存表格失败: {e}")
 else:
-    print("\n🤷‍♂️ 本次运行没有产生新数据，表格未更新。")
+    print("\n🤷‍♂️ 没有新数据，表格未更新。")
+表格未更新。")
