@@ -1,9 +1,9 @@
 name: Auto Scrape Fog Images
 
 on:
-  schedule:
-    - cron: '15,45 * * * *'
-  workflow_dispatch:
+    schedule:
+    - cron: '*/15 * * * *'
+    workflow_dispatch:
 
 jobs:
   scrape-and-save:
