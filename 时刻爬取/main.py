@@ -183,5 +183,5 @@ if new_data:
     except Exception as e:
         print(f"保存表格失败: {e}")
 else:
-    print("\n🤷‍♂️ 没有新数据，表格未更新。")
-表格未更新。")
+    print("没有新数据，表格未更新。")
+
