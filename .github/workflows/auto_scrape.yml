@@ -1,45 +1,53 @@
-name: Auto Scrape Fog Images
+name: Auto Weather & Image Scraper
 
 on:
-    schedule:
-        - cron: '0,15,30,45 * * * *'
-
-    workflow_dispatch:
+  # 1. 定时触发：每 15 分钟执行一次
+  schedule:
+    - cron: '*/15 * * * *'
+  # 2. 手动触发：允许你在 GitHub 网页端 Actions 页面手动点击 "Run workflow" 测试
+  workflow_dispatch: 
 
 jobs:
   scrape-and-save:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
-      - name: Checkout repository
+      - name: 1. 检出代码 (Checkout repository)
         uses: actions/checkout@v4
-        
-      - name: Install Tesseract OCR
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y tesseract-ocr tesseract-ocr-chi-sim
-          
-      - name: Set up Python
+
+      - name: 2. 设置 Python 环境 (Set up Python)
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          
-      - name: Install Python dependencies
+
+      - name: 3. 安装系统依赖 (Install Tesseract OCR)
         run: |
-          cd 时刻爬取
-          pip install -r requirements.txt
-          
-      - name: Run Scraper
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
+
+      - name: 4. 安装 Python 依赖 (Install Packages)
+        # 注意：这里使用了 opencv-python-headless，专为无界面的 Linux 服务器设计，防止报错
         run: |
-          cd 时刻爬取
+          python -m pip install --upgrade pip
+          pip install requests pandas Pillow pytesseract opencv-python-headless openpyxl numpy
+
+      - name: 5. 运行爬虫脚本 (Run Scraper)
+        # 核心：将 GitHub Secrets 中的 API KEY 映射为 Python 可以读取的环境变量
+        env:
+          QWEATHER_API_KEY: ${{ secrets.QWEATHER_API_KEY }}
+        run: |
+          # 如果你的 main.py 在根目录，直接运行：
           python main.py
           
-      - name: Commit and push changes
+          # ⚠️ 注意：如果你的 main.py 在某个文件夹里（比如叫 "时刻爬取"），请改成：
+          # cd 时刻爬取
+          # python main.py
+
+      - name: 6. 提交并推送数据 (Commit and Push Data)
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add -A
-          git diff-index --quiet HEAD || git commit -m "自动抓取最新图片和更新表格"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add data/
+          # 如果没有抓到新数据（比如被30分钟误差拦截了），commit 会失败，所以加上 || echo 避免整个工作流报错
+          git commit -m "Auto-update: 抓取最新气象与图像数据" || echo "No changes to commit"
           git push
