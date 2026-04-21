@@ -25,7 +25,7 @@ excel_path = os.path.join(excel_dir, "表.xlsx")
 os.makedirs(image_dir, exist_ok=True)
 os.makedirs(excel_dir, exist_ok=True)
 
-# 3. 读取现有表格
+# 3. 读取现有表格，防止重复抓取
 existing_times = set()
 if os.path.exists(excel_path):
     try:
@@ -99,6 +99,34 @@ def get_real_time_from_image(img_bytes):
         print(f"OCR 识别出错: {e}")
     return None
 
+def get_weather_data():
+    """调用和风天气 API 获取当前气象数据"""
+    api_key = os.environ.get("QWEATHER_API_KEY") 
+    if not api_key:
+        print("⚠️ 未找到 QWEATHER_API_KEY 环境变量，跳过气象数据获取。")
+        return None
+        
+    url = "https://p46r6yvpw2.re.qweatherapi.com/v7/weather/now"
+    params = {
+        "location": "116.37,39.97",
+        "key": api_key,
+        "lang": "zh",
+        "unit": "m"
+    }
+    
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        if str(data.get("code")) == "200":
+            vis = data["now"]["vis"]
+            print(f"✅ 气象数据获取成功！能见度: {vis}km, 观测时间: {data['now']['obsTime']}")
+            return data["now"]
+        else:
+            print(f"❌ 气象 API 返回错误码: {data.get('code')}")
+    except Exception as e:
+        print(f"🚨 气象 API 请求异常: {e}")
+    return None
+
 # 4. 爬取目标
 targets = [
     {"url": "http://view.iap.ac.cn:8080/imageview/northeast.jpg", "direction": "northeast"},
@@ -106,6 +134,15 @@ targets = [
 ]
 
 new_data = []
+
+# 🌟 在抓图前，先拉取一次气象数据
+print("\n正在获取实时气象数据...")
+weather_info = get_weather_data()
+vis_time = weather_info.get("obsTime", "") if weather_info else ""
+vis_val = weather_info.get("vis", "") if weather_info else ""
+weather_text = weather_info.get("text", "") if weather_info else ""
+temp = weather_info.get("temp", "") if weather_info else ""
+remark_info = f"{weather_text}, {temp}℃" if weather_info else ""
 
 for target in targets:
     url = target["url"]
@@ -134,17 +171,34 @@ for target in targets:
             print(f"🛑 时间 {final_time} 已存在，跳过。")
             continue
 
+        # --- 开始：时间解析与误差计算 ---
         try:
             final_dt = datetime.strptime(final_time, '%Y-%m-%d %H:%M:%S')
-            diff_seconds = (bjt_now - final_dt).total_seconds()
-            time_diff_min = round(diff_seconds / 60)
             is_daytime = 1 if 6 <= final_dt.hour < 18 else 0
+            
+            time_diff_min = ''
+            if vis_time:
+                # 截取和风天气时间前16位 (例如 "2026-04-21T20:15")
+                api_dt_str = vis_time[:16].replace('T', ' ')
+                api_dt = datetime.strptime(api_dt_str, '%Y-%m-%d %H:%M')
+                
+                # 计算绝对误差
+                diff_seconds = abs((api_dt - final_dt).total_seconds())
+                time_diff_min = round(diff_seconds / 60)
+                
         except Exception as e:
+            print(f"⚠️ 时间解析或误差计算失败: {e}")
             time_diff_min = ''
             is_daytime = ''
+        # --- 结束：时间解析与误差计算 ---
 
+        # 🛑 核心拦截器：误差大于 30 分钟直接丢弃！
+        if isinstance(time_diff_min, int) and time_diff_min > 30:
+            print(f"🗑️ 剔除劣质数据：图片时间 [{final_time}] 与气象时间相差 {time_diff_min} 分钟，超过 30 分钟阈值，已放弃保存。")
+            continue
+
+        # 保存图片
         safe_time_str = final_time.replace(':', '-')
-        # 顺便帮你把文件命名改成了“时间在前”，以后下载到电脑会自动按时间排序！
         image_filename = f"{safe_time_str}_{direction}.jpg"
         image_path = os.path.join(image_dir, image_filename)
 
@@ -152,11 +206,12 @@ for target in targets:
             f.write(img_bytes)
         print(f"✅ 保存图片: {image_filename}")
 
+        # 记录元数据
         new_data.append({
             '时间': final_time, '方向': direction, '图片路径': image_path, '图片名': image_filename,
             'time_source': time_source, 'is_valid': is_valid, 'is_daytime': is_daytime,
-            'visibility_time': '', 'visibility': '', 'time_diff_min': time_diff_min,
-            'label': '', 'remark': ''
+            'visibility_time': vis_time, 'visibility': vis_val, 'time_diff_min': time_diff_min,
+            'label': '', 'remark': remark_info
         })
 
     except Exception as e:
