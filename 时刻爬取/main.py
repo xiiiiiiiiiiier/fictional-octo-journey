@@ -108,7 +108,7 @@ def get_weather_data():
         
     url = "https://p46r6yvpw2.re.qweatherapi.com/v7/weather/now"
     params = {
-        "location": "116.37,39.97",
+        "location": "116.380,39.977", # 🎯 已更新为你的精确经纬度
         "key": api_key,
         "lang": "zh",
         "unit": "m"
