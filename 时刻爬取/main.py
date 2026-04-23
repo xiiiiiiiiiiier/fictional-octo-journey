@@ -138,11 +138,16 @@ new_data = []
 # 🌟 在抓图前，先拉取一次气象数据
 print("\n正在获取实时气象数据...")
 weather_info = get_weather_data()
+
+# 提取核心气象字段与新增的三个清洗字段
 vis_time = weather_info.get("obsTime", "") if weather_info else ""
 vis_val = weather_info.get("vis", "") if weather_info else ""
 weather_text = weather_info.get("text", "") if weather_info else ""
+rh_percent = weather_info.get("humidity", "") if weather_info else ""
+precip_mm = weather_info.get("precip", "") if weather_info else ""
+
 temp = weather_info.get("temp", "") if weather_info else ""
-remark_info = f"{weather_text}, {temp}℃" if weather_info else ""
+remark_info = f"温度:{temp}℃" if weather_info else ""
 
 for target in targets:
     url = target["url"]
@@ -206,11 +211,12 @@ for target in targets:
             f.write(img_bytes)
         print(f"✅ 保存图片: {image_filename}")
 
-        # 记录元数据
+        # 记录元数据，加入新增的三个气象字段
         new_data.append({
             '时间': final_time, '方向': direction, '图片路径': image_path, '图片名': image_filename,
             'time_source': time_source, 'is_valid': is_valid, 'is_daytime': is_daytime,
             'visibility_time': vis_time, 'visibility': vis_val, 'time_diff_min': time_diff_min,
+            'weather_text': weather_text, 'rh_percent': rh_percent, 'precip_mm': precip_mm,
             'label': '', 'remark': remark_info
         })
 
@@ -219,9 +225,11 @@ for target in targets:
 
 # 5. 更新 Excel 表格
 if new_data:
+    # 更新表头，加入新字段
     headers = [
         '时间', '方向', '图片路径', '图片名', 'time_source', 'is_valid', 
-        'is_daytime', 'visibility_time', 'visibility', 'time_diff_min', 'label', 'remark'
+        'is_daytime', 'visibility_time', 'visibility', 'time_diff_min', 
+        'weather_text', 'rh_percent', 'precip_mm', 'label', 'remark'
     ]
     
     if not os.path.exists(excel_path):
